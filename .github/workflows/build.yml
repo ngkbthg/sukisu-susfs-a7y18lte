@@ -27,19 +27,18 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/kernel
           
-          # 1. Nhúng SukiSU Ultra vào kernel tree
+          # 1. Nhúng SukiSU Ultra
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
 
-          # 2. Clone repo susfs4ksu từ GitLab
+          # 2. Clone repo susfs4ksu
           git clone https://gitlab.com/simonpunk/susfs4ksu.git $GITHUB_WORKSPACE/susfs
           
-          # 3. Copy các file nguồn SUSFS vào thư mục kernel
+          # 3. Copy các file nguồn SUSFS
           cp -f $GITHUB_WORKSPACE/susfs/kernel_patches/fs/* fs/
           cp -f $GITHUB_WORKSPACE/susfs/kernel_patches/include/linux/* include/linux/
           
-          # 4. Apply patch 4.9 (Dùng chuẩn cho cả Kernel 4.4!)
-          patch -p1 < $GITHUB_WORKSPACE/susfs/kernel_patches/50_add_susfs_in_kernel-4.9.patch
-
+          # 4. Apply patch với cờ Fuzz -F 3 và bỏ qua khoảng trắng
+          patch -p1 -F 3 --ignore-whitespace < $GITHUB_WORKSPACE/susfs/kernel_patches/50_add_susfs_in_kernel-4.9.patch
       - name: Biên Dịch Kernel
         run: |
           cd $GITHUB_WORKSPACE/kernel
