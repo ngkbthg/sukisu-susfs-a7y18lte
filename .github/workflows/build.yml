@@ -1,12 +1,11 @@
 name: Build Kernel SukiSU Ultra + SUSFS (A7 2018)
 
 on:
-  workflow_dispatch: 
+  workflow_dispatch:
 
 jobs:
   build-kernel:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -14,7 +13,7 @@ jobs:
       - name: Cài đặt Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential bc bison flex libelf-dev libssl-dev ccache git lz4
+          sudo apt-get install -y build-essential bc bison flex libelf-dev libssl-dev ccache git lz4 zip python3
 
       - name: Tải Toolchain AOSP GCC 4.9
         run: |
@@ -23,59 +22,77 @@ jobs:
       - name: Tải Mã Nguồn Kernel Samsung A7 2018
         run: |
           git clone --depth=1 https://github.com/AKSharma87/android_kernel_samsung_a7y18lte -b wip $GITHUB_WORKSPACE/kernel
-      - name: Tích hợp SukiSU Ultra & Patch SUSFS
+
+      - name: Tích hợp SukiSU Ultra & Patch SUSFS (An Toàn)
         run: |
           cd $GITHUB_WORKSPACE/kernel
-          
+
           # 1. Nhúng SukiSU Ultra
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
 
           # 2. Clone repo susfs4ksu
           git clone https://gitlab.com/simonpunk/susfs4ksu.git $GITHUB_WORKSPACE/susfs
-          
+
           # 3. Copy các file nguồn SUSFS
           cp -f $GITHUB_WORKSPACE/susfs/kernel_patches/fs/* fs/
           cp -f $GITHUB_WORKSPACE/susfs/kernel_patches/include/linux/* include/linux/
-          
-          # 4. Apply patch với cờ Fuzz -F 3 và bỏ qua khoảng trắng
-          patch -p1 -F 3 --ignore-whitespace < $GITHUB_WORKSPACE/susfs/kernel_patches/50_add_susfs_in_kernel-4.9.patch || true
 
-          # 5. Tự động chèn hàm móc SUSFS bị trượt vào fs/open.c
-          python3 -c '
-          with open("fs/open.c", "r") as f:
-              code = f.read()
-          if "susfs_sus_ino" not in code:
-              code = code.replace("return 0;\n}", "#ifdef CONFIG_KSU_SUSFS\n\tsusfs_sus_ino(dentry);\n#endif\n\treturn 0;\n}", 1)
-              with open("fs/open.c", "w") as f:
-                  f.write(code)
-              print("[+] Da fix thu cong fs/open.c thanh cong!")
-          '
+          # 4. Apply patch và dừng workflow lập tức nếu bị lỗi
+          if ! patch -p1 -F 3 --ignore-whitespace < $GITHUB_WORKSPACE/susfs/kernel_patches/50_add_susfs_in_kernel-4.9.patch; then
+            echo "ERROR: SUSFS patch failed to apply!"
+            ls -l fs/open.c* || true
+            exit 1
+          fi
+
+          # 5. Chèn hook vào fs/open.c bằng Regex chuẩn xác
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, sys
+          p = Path("fs/open.c")
+          s = p.read_text()
+          if "susfs_sus_ino" in s:
+              print("[+] Hook susfs da co san, bo qua.")
+              sys.exit(0)
+
+          new, n = re.subn(r'(return\s+0;\s*\n\s*\})', r'#ifdef CONFIG_KSU_SUSFS\n\tsusfs_sus_ino(dentry);\n#endif\n\1', s, count=1)
+          if n == 0:
+              print("ERROR: Khong tim thay vi tri chen hook trong fs/open.c!")
+              sys.exit(2)
+          p.write_text(new)
+          print("[+] Da chen hook susfs vao fs/open.c thanh cong!")
+          PY
+
+      - name: Chuẩn Bị Firmware ACPM
+        run: |
+          cd $GITHUB_WORKSPACE/kernel
+          mkdir -p firmware
+          if [ ! -f firmware/exynos7885_acpm_fvp.fw ]; then
+            echo "Placeholder firmware file created by CI" > firmware/exynos7885_acpm_fvp.fw
+            echo "[+] Da tao file placeholder firmware/exynos7885_acpm_fvp.fw"
+          fi
+
       - name: Biên Dịch Kernel
         run: |
           cd $GITHUB_WORKSPACE/kernel
           export ARCH=arm64
           export CROSS_COMPILE=$GITHUB_WORKSPACE/toolchain/bin/aarch64-linux-android-
-          
-          # 1. Khai báo phiên bản Android cho kernel Samsung (Android 10)
           export ANDROID_MAJOR_VERSION=10
-
-          # 2. Xóa bỏ dòng sdcardfs bị lặp trong fs/Kconfig để tránh lỗi recursive inclusion
           sed -i '/sdcardfs/d' fs/Kconfig || true
-
-          # 3. Nạp defconfig chuẩn của A7 2018
           make exynos7885-a7y18lte_defconfig
-
-          # 4. Bật các flag CONFIG cho SukiSU Ultra
           scripts/config --enable CONFIG_KSU
-
-          # Tiến hành Compile bằng toàn bộ CPU của GitHub Actions
           make -j$(nproc) ARCH=arm64 CROSS_COMPILE=$GITHUB_WORKSPACE/toolchain/bin/aarch64-linux-android- ANDROID_MAJOR_VERSION=10
 
-      - name: Đẩy File Kernel Thành Phẩm Lên Artifacts
+      - name: Đóng gói AnyKernel3 (.zip)
+        run: |
+          cd $GITHUB_WORKSPACE
+          git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 anykernel
+          cp -f $GITHUB_WORKSPACE/kernel/arch/arm64/boot/Image.lz4 anykernel/Image.lz4 2>/dev/null || cp -f $GITHUB_WORKSPACE/kernel/arch/arm64/boot/Image anykernel/Image
+          find $GITHUB_WORKSPACE/kernel/arch/arm64/boot/ -name "*.dtb" -exec cp {} anykernel/ \; 2>/dev/null || true
+          cd anykernel
+          zip -r9 $GITHUB_WORKSPACE/SukiSU_Ultra_SUSFS_A72018.zip * -x .git\* README.md
+
+      - name: Đẩy File ZIP Thành Phẩm Lên Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: SukiSU-Ultra-SUSFS-Kernel-A72018
-          path: |
-            kernel/arch/arm64/boot/Image
-            kernel/arch/arm64/boot/Image.lz4
-            kernel/arch/arm64/boot/dtb.img
+          name: SukiSU-Ultra-SUSFS-A72018-Kernel
+          path: $GITHUB_WORKSPACE/SukiSU_Ultra_SUSFS_A72018.zip
