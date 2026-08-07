@@ -101,4 +101,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: SukiSU-Ultra-SUSFS-A72018-Kernel
-          path: $GITHUB_WORKSPACE/SukiSU_Ultra_SUSFS_A72018.zip
+          path: "*.zip"
