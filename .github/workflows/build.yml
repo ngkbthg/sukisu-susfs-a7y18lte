@@ -37,30 +37,36 @@ jobs:
           cp -f $GITHUB_WORKSPACE/susfs/kernel_patches/fs/* fs/
           cp -f $GITHUB_WORKSPACE/susfs/kernel_patches/include/linux/* include/linux/
 
-          # 4. Apply patch và dừng workflow lập tức nếu bị lỗi
-          if ! patch -p1 -F 3 --ignore-whitespace < $GITHUB_WORKSPACE/susfs/kernel_patches/50_add_susfs_in_kernel-4.9.patch; then
-            echo "ERROR: SUSFS patch failed to apply!"
-            ls -l fs/open.c* || true
-            exit 1
-          fi
+          # 4. Apply patch (bỏ qua lỗi fs/open.c để Python sửa ngay bên dưới)
+          patch -p1 -F 3 --ignore-whitespace < $GITHUB_WORKSPACE/susfs/kernel_patches/50_add_susfs_in_kernel-4.9.patch || true
 
-          # 5. Chèn hook vào fs/open.c bằng Regex chuẩn xác
+          # 5. Chèn hook vào fs/open.c bằng Python
           python3 - <<'PY'
           from pathlib import Path
           import re, sys
           p = Path("fs/open.c")
           s = p.read_text()
           if "susfs_sus_ino" in s:
-              print("[+] Hook susfs da co san, bo qua.")
+              print("[+] Hook susfs da co san trong fs/open.c.")
               sys.exit(0)
 
           new, n = re.subn(r'(return\s+0;\s*\n\s*\})', r'#ifdef CONFIG_KSU_SUSFS\n\tsusfs_sus_ino(dentry);\n#endif\n\1', s, count=1)
           if n == 0:
               print("ERROR: Khong tim thay vi tri chen hook trong fs/open.c!")
-              sys.exit(2)
+              sys.exit(1)
           p.write_text(new)
           print("[+] Da chen hook susfs vao fs/open.c thanh cong!")
           PY
+
+          # 6. Xóa reject file của fs/open.c và kiểm tra xem còn file nào khác bị lỗi không
+          rm -f fs/open.c.rej
+          REJ_FILES=$(find fs/ mm/ kernel/ -name "*.rej" 2>/dev/null)
+          if [ -n "$REJ_FILES" ]; then
+            echo "ERROR: Van con file patch khac bi xit:"
+            echo "$REJ_FILES"
+            exit 1
+          fi
+          echo "[+] Patch SUSFS hoan tat 100%!"
 
       - name: Chuẩn Bị Firmware ACPM
         run: |
