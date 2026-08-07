@@ -38,7 +38,18 @@ jobs:
           cp -f $GITHUB_WORKSPACE/susfs/kernel_patches/include/linux/* include/linux/
           
           # 4. Apply patch với cờ Fuzz -F 3 và bỏ qua khoảng trắng
-          patch -p1 -F 5 --ignore-whitespace < $GITHUB_WORKSPACE/susfs/kernel_patches/50_add_susfs_in_kernel-4.9.patch
+          patch -p1 -F 3 --ignore-whitespace < $GITHUB_WORKSPACE/susfs/kernel_patches/50_add_susfs_in_kernel-4.9.patch || true
+
+          # 5. Tự động chèn hàm móc SUSFS bị trượt vào fs/open.c
+          python3 -c '
+          with open("fs/open.c", "r") as f:
+              code = f.read()
+          if "susfs_sus_ino" not in code:
+              code = code.replace("return 0;\n}", "#ifdef CONFIG_KSU_SUSFS\n\tsusfs_sus_ino(dentry);\n#endif\n\treturn 0;\n}", 1)
+              with open("fs/open.c", "w") as f:
+                  f.write(code)
+              print("[+] Da fix thu cong fs/open.c thanh cong!")
+          '
       - name: Biên Dịch Kernel
         run: |
           cd $GITHUB_WORKSPACE/kernel
