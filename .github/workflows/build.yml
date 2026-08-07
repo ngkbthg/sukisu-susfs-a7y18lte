@@ -38,7 +38,7 @@ jobs:
           cp -f $GITHUB_WORKSPACE/susfs/kernel_patches/include/linux/* include/linux/
           
           # 4. Apply patch với cờ Fuzz -F 3 và bỏ qua khoảng trắng
-          patch -p1 -F 3 --ignore-whitespace < $GITHUB_WORKSPACE/susfs/kernel_patches/50_add_susfs_in_kernel-4.9.patch
+          patch -p1 -F 5 --ignore-whitespace < $GITHUB_WORKSPACE/susfs/kernel_patches/50_add_susfs_in_kernel-4.9.patch
       - name: Biên Dịch Kernel
         run: |
           cd $GITHUB_WORKSPACE/kernel
