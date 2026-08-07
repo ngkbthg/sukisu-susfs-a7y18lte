@@ -55,20 +55,21 @@ jobs:
           cd $GITHUB_WORKSPACE/kernel
           export ARCH=arm64
           export CROSS_COMPILE=$GITHUB_WORKSPACE/toolchain/bin/aarch64-linux-android-
+          
+          # 1. Khai báo phiên bản Android cho kernel Samsung (Android 10)
+          export ANDROID_MAJOR_VERSION=10
 
-          # Nạp defconfig chuẩn của A7 2018
+          # 2. Xóa bỏ dòng sdcardfs bị lặp trong fs/Kconfig để tránh lỗi recursive inclusion
+          sed -i '/sdcardfs/d' fs/Kconfig || true
+
+          # 3. Nạp defconfig chuẩn của A7 2018
           make exynos7885-a7y18lte_defconfig
 
-          # Bật các flag CONFIG cho SukiSU Ultra & SUSFS
+          # 4. Bật các flag CONFIG cho SukiSU Ultra
           scripts/config --enable CONFIG_KSU
-          scripts/config --enable CONFIG_KSU_SUSFS
-          scripts/config --enable CONFIG_KSU_SUSFS_SUS_PATH
-          scripts/config --enable CONFIG_KSU_SUSFS_SUS_MOUNT
-          scripts/config --enable CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT
-          scripts/config --enable CONFIG_KSU_SUSFS_SUS_SU
 
           # Tiến hành Compile bằng toàn bộ CPU của GitHub Actions
-          make -j$(nproc) ARCH=arm64 CROSS_COMPILE=$GITHUB_WORKSPACE/toolchain/bin/aarch64-linux-android-
+          make -j$(nproc) ARCH=arm64 CROSS_COMPILE=$GITHUB_WORKSPACE/toolchain/bin/aarch64-linux-android- ANDROID_MAJOR_VERSION=10
 
       - name: Đẩy File Kernel Thành Phẩm Lên Artifacts
         uses: actions/upload-artifact@v4
