@@ -23,23 +23,22 @@ jobs:
       - name: Tải Mã Nguồn Kernel Samsung A7 2018
         run: |
           git clone --depth=1 https://github.com/AKSharma87/android_kernel_samsung_a7y18lte -b wip $GITHUB_WORKSPACE/kernel
-
       - name: Tích hợp SukiSU Ultra & Patch SUSFS
         run: |
           cd $GITHUB_WORKSPACE/kernel
           
-          # 1. Nhúng SukiSU Ultra
+          # 1. Nhúng SukiSU Ultra vào kernel tree
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
 
-          # 2. Tải và Apply Patch SUSFS cho Kernel 4.4
-          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b kernel-4.4 $GITHUB_WORKSPACE/susfs
+          # 2. Clone repo susfs4ksu từ GitLab
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git $GITHUB_WORKSPACE/susfs
           
-          # Copy các file nguồn SUSFS vào kernel tree
-          cp -f $GITHUB_WORKSPACE/susfs/kernel_patches/fs/* fs/ || true
-          cp -f $GITHUB_WORKSPACE/susfs/kernel_patches/include/linux/* include/linux/ || true
+          # 3. Copy các file nguồn SUSFS vào thư mục kernel
+          cp -f $GITHUB_WORKSPACE/susfs/kernel_patches/fs/* fs/
+          cp -f $GITHUB_WORKSPACE/susfs/kernel_patches/include/linux/* include/linux/
           
-          # Apply patch SUSFS cho kernel 4.4
-          patch -p1 < $GITHUB_WORKSPACE/susfs/kernel_patches/50_add_susfs_in_kernel-4.4.patch || true
+          # 4. Apply patch 4.9 (Dùng chuẩn cho cả Kernel 4.4!)
+          patch -p1 < $GITHUB_WORKSPACE/susfs/kernel_patches/50_add_susfs_in_kernel-4.9.patch
 
       - name: Biên Dịch Kernel
         run: |
