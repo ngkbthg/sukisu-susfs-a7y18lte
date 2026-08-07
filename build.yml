@@ -1,0 +1,71 @@
+name: Build Kernel SukiSU Ultra + SUSFS (A7 2018)
+
+on:
+  workflow_dispatch: 
+
+jobs:
+  build-kernel:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Cài đặt Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc bison flex libelf-dev libssl-dev ccache git lz4
+
+      - name: Tải Toolchain AOSP GCC 4.9
+        run: |
+          git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b android10-gsi --depth=1 $GITHUB_WORKSPACE/toolchain
+
+      - name: Tải Mã Nguồn Kernel Samsung A7 2018
+        run: |
+          git clone --depth=1 https://github.com/AKSharma87/android_kernel_samsung_a7y18lte -b wip $GITHUB_WORKSPACE/kernel
+
+      - name: Tích hợp SukiSU Ultra & Patch SUSFS
+        run: |
+          cd $GITHUB_WORKSPACE/kernel
+          
+          # 1. Nhúng SukiSU Ultra
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
+
+          # 2. Tải và Apply Patch SUSFS cho Kernel 4.4
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b kernel-4.4 $GITHUB_WORKSPACE/susfs
+          
+          # Copy các file nguồn SUSFS vào kernel tree
+          cp -f $GITHUB_WORKSPACE/susfs/kernel_patches/fs/* fs/ || true
+          cp -f $GITHUB_WORKSPACE/susfs/kernel_patches/include/linux/* include/linux/ || true
+          
+          # Apply patch SUSFS cho kernel 4.4
+          patch -p1 < $GITHUB_WORKSPACE/susfs/kernel_patches/50_add_susfs_in_kernel-4.4.patch || true
+
+      - name: Biên Dịch Kernel
+        run: |
+          cd $GITHUB_WORKSPACE/kernel
+          export ARCH=arm64
+          export CROSS_COMPILE=$GITHUB_WORKSPACE/toolchain/bin/aarch64-linux-android-
+
+          # Nạp defconfig chuẩn của A7 2018
+          make exynos7885-a7y18lte_defconfig
+
+          # Bật các flag CONFIG cho SukiSU Ultra & SUSFS
+          scripts/config --enable CONFIG_KSU
+          scripts/config --enable CONFIG_KSU_SUSFS
+          scripts/config --enable CONFIG_KSU_SUSFS_SUS_PATH
+          scripts/config --enable CONFIG_KSU_SUSFS_SUS_MOUNT
+          scripts/config --enable CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT
+          scripts/config --enable CONFIG_KSU_SUSFS_SUS_SU
+
+          # Tiến hành Compile bằng toàn bộ CPU của GitHub Actions
+          make -j$(nproc) ARCH=arm64 CROSS_COMPILE=$GITHUB_WORKSPACE/toolchain/bin/aarch64-linux-android-
+
+      - name: Đẩy File Kernel Thành Phẩm Lên Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: SukiSU-Ultra-SUSFS-Kernel-A72018
+          path: |
+            kernel/arch/arm64/boot/Image
+            kernel/arch/arm64/boot/Image.lz4
+            kernel/arch/arm64/boot/dtb.img
