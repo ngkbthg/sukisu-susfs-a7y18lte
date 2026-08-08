@@ -36,7 +36,7 @@ jobs:
       - name: Tích hợp ReSuKiSu
         run: |
           cd $KERNEL_DIR
-          curl -LSs https://raw.githubusercontent.com/rsuntk/ReSuKiSu/main/kernel/setup.sh | bash -s main
+          curl -LSs https://raw.githubusercontent.com/ReSuKiSU/ReSuKiSU/main/kernel/setup.sh | bash -s main
 
       - name: Patch SuSFS Backport (Linux 4.4)
         run: |
