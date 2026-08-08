@@ -41,7 +41,7 @@ jobs:
       - name: Tải Và Áp Dụng Patch SuSFS Backport (Linux 4.4)
         run: |
           cd $KERNEL_DIR
-          PATCH_URL="https://raw.githubusercontent.com/JackA11tman/NonGKI_Kernel_Build_2nd/mainline/Patches/Patch/susfs_patch_to_4.4.patch"
+          PATCH_URL="https://raw.githubusercontent.com/JackA1ltman/NonGKI_Kernel_Build_2nd/mainline/Patches/Patch/susfs_patch_to_4.4.patch"
           curl -sSL -f "$PATCH_URL" -o susfs.patch
 
           if grep -q "diff --git" susfs.patch || grep -q "--- " susfs.patch; then
