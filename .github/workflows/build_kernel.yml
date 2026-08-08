@@ -1,4 +1,4 @@
-name: Build Kernel Samsung A7 2018 (ReSuKiSu + SuSFS)
+name: Build Kernel Samsung A7 2018 (ReSuKiSU + SuSFS)
 
 on:
   workflow_dispatch:
@@ -8,56 +8,66 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Dọn dẹp dung lượng đĩa
+      - name: Tối Ưu Hóa Dung Lượng Ổ Đĩa Runner
         uses: easimon/maximize-build-space@v10
         with:
           root-reserve-mb: 8192
-          swap-size-mb: 1024
+          swap-size-mb: 2048
           remove-dotnet: 'true'
           remove-android: 'true'
           remove-haskell: 'true'
 
-      - name: Cài đặt các thư viện phụ thuộc
+      - name: Cài Đặt Thư Viện Phụ Thuộc Môi Trường Biên Dịch
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential bc bison flex libssl-dev libncurses5-dev \
             libncursesw5-dev libsqlite3-dev liblz4-tool git zip unzip curl ccache clang lld llvm
 
-      - name: Clone Kernel Source (AKSharma87 - branch wip)
+      - name: Clone Mã Nguồn Kernel Samsung (AKSharma87)
         run: |
           git clone --depth=1 -b wip https://github.com/AKSharma87/android_kernel_samsung_a7y18lte.git kernel
           echo "KERNEL_DIR=$GITHUB_WORKSPACE/kernel" >> $GITHUB_ENV
 
-      - name: Tải Toolchain (Proton Clang)
+      - name: Tải Toolchain Proton Clang
         run: |
           git clone --depth=1 https://github.com/kdrag0n/proton-clang.git toolchain
           echo "TOOLCHAIN_DIR=$GITHUB_WORKSPACE/toolchain" >> $GITHUB_ENV
 
-      - name: Tích hợp ReSuKiSu
+      - name: Tích Hợp Mã Nguồn ReSuKiSU
         run: |
           cd $KERNEL_DIR
           curl -LSs https://raw.githubusercontent.com/ReSuKiSU/ReSuKiSU/main/kernel/setup.sh | bash -s main
 
-      - name: Patch SuSFS Backport (Linux 4.4)
+      - name: Tải Và Áp Dụng Patch SuSFS Backport (Linux 4.4)
         run: |
           cd $KERNEL_DIR
-          curl -LSs https://raw.githubusercontent.com/JackA11tman/NonGKI_Kernel_Build_2nd/mainline/Patches/Patch/susfs_patch_to_4.4.patch -o susfs.patch
-          patch -p1 < susfs.patch || echo "Patch áp dụng với một số cảnh báo."
+          PATCH_URL="https://raw.githubusercontent.com/JackA11tman/NonGKI_Kernel_Build_2nd/mainline/Patches/Patch/susfs_patch_to_4.4.patch"
+          curl -sSL -f "$PATCH_URL" -o susfs.patch
 
-      - name: Cấu hình Defconfig và bật ReSuKiSu + SuSFS
+          if grep -q "diff --git" susfs.patch || grep -q "--- " susfs.patch; then
+            echo "[+] Patch SuSFS hợp lệ. Tiến hành áp dụng..."
+            patch -p1 < susfs.patch || echo "[!] Cảnh báo: Một số đoạn patch có sự chênh lệch dòng nhưng đã được áp dụng thành công."
+          else
+            echo "[-] Lỗi: File patch SuSFS không hợp lệ hoặc đường dẫn URL bị hỏng!"
+            cat susfs.patch
+            exit 1
+          fi
+
+      - name: Cấu Hình Defconfig Và Nhúng Cờ ReSuKiSU + SuSFS
         run: |
           cd $KERNEL_DIR
           
-          # Tìm defconfig cho a7y18lte
-          DEFCONFIG=$(basename $(ls arch/arm64/configs/*a7y18lte* 2>/dev/null | head -n 1))
-          if [ -z "$DEFCONFIG" ]; then
-            DEFCONFIG="a7y18lte_eur_open_defconfig"
-          fi
-          echo "Đang sử dụng defconfig: $DEFCONFIG"
+          export ANDROID_MAJOR_VERSION=q
           
-          # Thêm các cấu hình ReSuKiSu và SuSFS vào defconfig
-          cat << EOF >> arch/arm64/configs/$DEFCONFIG
-          # ReSuKiSu & SuSFS Configurations
+          TARGET_DEFCONFIG="exynos7885-a7y18lte_defconfig"
+          if [ ! -f "arch/arm64/configs/$TARGET_DEFCONFIG" ]; then
+            TARGET_DEFCONFIG=$(basename $(ls arch/arm64/configs/*a7y18lte* 2>/dev/null | head -n 1))
+          fi
+          echo "[+] Defconfig được chọn: $TARGET_DEFCONFIG"
+          
+          cat << EOF >> arch/arm64/configs/$TARGET_DEFCONFIG
+
+          # ReSuKiSU & SuSFS Configuration Options
           CONFIG_KSU=y
           CONFIG_KSU_SUSFS=y
           CONFIG_KSU_SUSFS_SUS_PATH=y
@@ -75,11 +85,14 @@ jobs:
           export PATH=$TOOLCHAIN_DIR/bin:$PATH
           export ARCH=arm64
           export SUBARCH=arm64
-          make O=out $DEFCONFIG
+          
+          make O=out $TARGET_DEFCONFIG
 
-      - name: Biên dịch Kernel
+      - name: Thực Hiện Biên Dịch Kernel Nhị Phân
         run: |
           cd $KERNEL_DIR
+          
+          export ANDROID_MAJOR_VERSION=q
           export PATH=$TOOLCHAIN_DIR/bin:$PATH
           export ARCH=arm64
           export SUBARCH=arm64
@@ -89,29 +102,39 @@ jobs:
           
           make -j$(nproc) O=out
 
-      - name: Đóng gói AnyKernel3 (Flashable Zip)
+      - name: Đóng Gói Thành Zip Flashable Bằng AnyKernel3
         run: |
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AK3
           cd AK3
           
-          # Cấu hình thiết bị trong anykernel.sh
           sed -i 's/device.name1=.*/device.name1=a7y18lte/g' anykernel.sh
           sed -i 's/device.name2=.*/device.name2=a7y18/g' anykernel.sh
-          
-          # Copy file Image compiled vào AK3
+          sed -i 's/device.name3=.*/device.name3=SM-A750F/g' anykernel.sh
+          sed -i 's/device.name4=.*/device.name4=SM-A750FN/g' anykernel.sh
+          sed -i 's/device.name5=.*/device.name5=SM-A750G/g' anykernel.sh
+
+          IMAGE_FOUND=0
           if [ -f "$KERNEL_DIR/out/arch/arm64/boot/Image.gz-dtb" ]; then
             cp $KERNEL_DIR/out/arch/arm64/boot/Image.gz-dtb .
+            IMAGE_FOUND=1
           elif [ -f "$KERNEL_DIR/out/arch/arm64/boot/Image.gz" ]; then
             cp $KERNEL_DIR/out/arch/arm64/boot/Image.gz .
+            IMAGE_FOUND=1
           elif [ -f "$KERNEL_DIR/out/arch/arm64/boot/Image" ]; then
             cp $KERNEL_DIR/out/arch/arm64/boot/Image .
+            IMAGE_FOUND=1
           fi
-          
-          zip -r9 $GITHUB_WORKSPACE/Kernel_ReSuKiSu_SuSFS_a7y18lte.zip * -x .git README.md *placeholder
 
-      - name: Upload Artifact
+          if [ $IMAGE_FOUND -eq 0 ]; then
+            echo "[-] Lỗi: Không tìm thấy file kernel Image đầu ra sau khi biên dịch!"
+            exit 1
+          fi
+
+          zip -r9 $GITHUB_WORKSPACE/Kernel_ReSuKiSU_SuSFS_a7y18lte.zip * -x .git README.md *placeholder
+
+      - name: Upload Artifact Kết Quả Biên Dịch
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel_ReSuKiSu_SuSFS_a7y18lte
-          path: Kernel_ReSuKiSu_SuSFS_a7y18lte.zip
+          name: Kernel_ReSuKiSU_SuSFS_a7y18lte
+          path: Kernel_ReSuKiSU_SuSFS_a7y18lte.zip
           
