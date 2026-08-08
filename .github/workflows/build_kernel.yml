@@ -1,0 +1,117 @@
+name: Build Kernel Samsung A7 2018 (ReSuKiSu + SuSFS)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-kernel:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Dọn dẹp dung lượng đĩa
+        uses: easimon/maximize-build-space@v10
+        with:
+          root-reserve-mb: 8192
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+
+      - name: Cài đặt các thư viện phụ thuộc
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc bison flex libssl-dev libncurses5-dev \
+            libncursesw5-dev libsqlite3-dev liblz4-tool git zip unzip curl ccache clang lld llvm
+
+      - name: Clone Kernel Source (AKSharma87 - branch wip)
+        run: |
+          git clone --depth=1 -b wip https://github.com/AKSharma87/android_kernel_samsung_a7y18lte.git kernel
+          echo "KERNEL_DIR=$GITHUB_WORKSPACE/kernel" >> $GITHUB_ENV
+
+      - name: Tải Toolchain (Proton Clang)
+        run: |
+          git clone --depth=1 https://github.com/kdrag0n/proton-clang.git toolchain
+          echo "TOOLCHAIN_DIR=$GITHUB_WORKSPACE/toolchain" >> $GITHUB_ENV
+
+      - name: Tích hợp ReSuKiSu
+        run: |
+          cd $KERNEL_DIR
+          curl -LSs https://raw.githubusercontent.com/rsuntk/ReSuKiSu/main/kernel/setup.sh | bash -s main
+
+      - name: Patch SuSFS Backport (Linux 4.4)
+        run: |
+          cd $KERNEL_DIR
+          curl -LSs https://raw.githubusercontent.com/JackA11tman/NonGKI_Kernel_Build_2nd/mainline/Patches/Patch/susfs_patch_to_4.4.patch -o susfs.patch
+          patch -p1 < susfs.patch || echo "Patch áp dụng với một số cảnh báo."
+
+      - name: Cấu hình Defconfig và bật ReSuKiSu + SuSFS
+        run: |
+          cd $KERNEL_DIR
+          
+          # Tìm defconfig cho a7y18lte
+          DEFCONFIG=$(basename $(ls arch/arm64/configs/*a7y18lte* 2>/dev/null | head -n 1))
+          if [ -z "$DEFCONFIG" ]; then
+            DEFCONFIG="a7y18lte_eur_open_defconfig"
+          fi
+          echo "Đang sử dụng defconfig: $DEFCONFIG"
+          
+          # Thêm các cấu hình ReSuKiSu và SuSFS vào defconfig
+          cat << EOF >> arch/arm64/configs/$DEFCONFIG
+          # ReSuKiSu & SuSFS Configurations
+          CONFIG_KSU=y
+          CONFIG_KSU_SUSFS=y
+          CONFIG_KSU_SUSFS_SUS_PATH=y
+          CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSUM=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y
+          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
+          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+          CONFIG_KSU_SUSFS_ENABLE_LOG=y
+          CONFIG_KSU_SUSFS_HIDE_KSU=y
+          EOF
+
+          export PATH=$TOOLCHAIN_DIR/bin:$PATH
+          export ARCH=arm64
+          export SUBARCH=arm64
+          make O=out $DEFCONFIG
+
+      - name: Biên dịch Kernel
+        run: |
+          cd $KERNEL_DIR
+          export PATH=$TOOLCHAIN_DIR/bin:$PATH
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CC=clang
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+          
+          make -j$(nproc) O=out
+
+      - name: Đóng gói AnyKernel3 (Flashable Zip)
+        run: |
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AK3
+          cd AK3
+          
+          # Cấu hình thiết bị trong anykernel.sh
+          sed -i 's/device.name1=.*/device.name1=a7y18lte/g' anykernel.sh
+          sed -i 's/device.name2=.*/device.name2=a7y18/g' anykernel.sh
+          
+          # Copy file Image compiled vào AK3
+          if [ -f "$KERNEL_DIR/out/arch/arm64/boot/Image.gz-dtb" ]; then
+            cp $KERNEL_DIR/out/arch/arm64/boot/Image.gz-dtb .
+          elif [ -f "$KERNEL_DIR/out/arch/arm64/boot/Image.gz" ]; then
+            cp $KERNEL_DIR/out/arch/arm64/boot/Image.gz .
+          elif [ -f "$KERNEL_DIR/out/arch/arm64/boot/Image" ]; then
+            cp $KERNEL_DIR/out/arch/arm64/boot/Image .
+          fi
+          
+          zip -r9 $GITHUB_WORKSPACE/Kernel_ReSuKiSu_SuSFS_a7y18lte.zip * -x .git README.md *placeholder
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kernel_ReSuKiSu_SuSFS_a7y18lte
+          path: Kernel_ReSuKiSu_SuSFS_a7y18lte.zip
+          
